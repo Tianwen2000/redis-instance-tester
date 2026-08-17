@@ -1,0 +1,43 @@
+{
+  "connection": {
+    "host": "10.0.0.17",
+    "port": 6379,
+    "db": 0,
+    "ssl": false,
+    "socket_connect_timeout": 5.0,
+    "socket_timeout": 5.0
+  },
+  "authentication": {
+    "mode": "prompt",
+    "username": null,
+    "password_env": "REDIS_PASSWORD",
+    "required": true
+  },
+  "execution": {
+    "profile": "standard",
+    "suites": null,
+    "namespace": "zhuque:redis-test",
+    "cleanup": "always",
+    "ttl_seconds": 3
+  },
+  "expectations": {
+    "architecture": "master-slave",
+    "version_prefix": "4.",
+    "replicas": 1,
+    "max_replica_lag_seconds": 2,
+    "require_engine_persistence": false
+  },
+  "atomicity": {
+    "requests": 1000,
+    "concurrency": 10
+  },
+  "performance": {
+    "requests": 5000,
+    "concurrency": 10,
+    "value_size": 128,
+    "keyspace": 500
+  },
+  "report": {
+    "directory": "reports"
+  }
+}
