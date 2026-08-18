@@ -5,7 +5,7 @@
 当前示例配置对应：
 
 ```text
-实例：按量计费开始
+实例：按量计费实例
 实例 ID：crs-8hz033uk
 地址：10.0.0.17:6379
 架构：Redis 4.x master-slave
@@ -37,10 +37,9 @@ redis-instance-tester/
 ├── redis-test.example.json        # 完整配置示例，不保存真实密码
 ├── requirements.txt               # 运行依赖：redis-py
 ├── requirements-dev.txt           # 开发测试依赖：运行依赖 + fakeredis
-├── .gitignore                     # 忽略虚拟环境、缓存和测试报告
+├── .gitignore                     # 忽略缓存、报告和本地敏感文件
 ├── README.md                      # 部署、配置、测试场景和维护说明
 ├── reports/                       # 运行时生成的 JSON 报告，默认不提交 Git
-├── .venv/                         # 本地 Python 虚拟环境，运行时生成
 └── __pycache__/                   # Python 字节码缓存，运行时生成
 ```
 
@@ -58,7 +57,7 @@ redis-instance-tester/
   默认跳过，避免开发机或 CI 意外操作云实例。
 - `.github/workflows/tests.yml`：每次 push 和 pull request 执行编译检查、普通单元测试和
   `python -O` 优化模式测试。
-- `reports/`、`.venv/` 和 `__pycache__/`：均为运行时目录，不属于需要上传或提交的源码。
+- `reports/` 和 `__pycache__/`：均为运行时目录，不属于需要上传或提交的源码。
 
 程序执行关系：
 
@@ -96,7 +95,7 @@ Ubuntu / Debian：
 
 ```bash
 apt-get update
-apt-get install -y git python3 python3-venv python3-pip
+apt-get install -y git python3 python3-pip
 ```
 
 Rocky Linux / AlmaLinux 9：
@@ -109,18 +108,15 @@ dnf install -y git python3 python3-pip
 Python 2.7；较旧发行版如果软件源无法提供 Python 3.8+，应升级系统或使用经过维护的
 Python 软件源。
 
-系统 Python 和 Git 只需安装一次。项目首次下载后，在项目目录创建服务器自己的虚拟环境：
+系统 Python、Git 和项目依赖只需在服务器首次部署时安装。本项目在专用测试服务器上直接
+使用系统 `python3`，不创建 Python 虚拟环境：
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 
-`.venv` 依赖服务器的操作系统和 Python 路径，不应上传到 GitHub，也不能把 Windows 创建的
-`.venv` 复制到 Linux 使用。以后执行 `git pull` 更新项目时，服务器上的 `.venv` 会继续保留，
-不需要重新安装系统 Python。
+以后执行 `git pull` 更新项目时，不需要重新安装系统 Python；只有 `requirements.txt`
+发生变化时才需要重新执行依赖安装命令。
 
 ## 从公开 GitHub 仓库部署
 
@@ -135,10 +131,8 @@ git clone --depth 1 \
   https://github.com/Tianwen2000/redis-instance-tester.git
 cd redis-instance-tester
 
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
+python3 redis_instance_test.py --list-suites
 ```
 
 后续更新不需要重新上传目录：
@@ -146,67 +140,65 @@ python -m pip install -r requirements.txt
 ```bash
 cd /opt/redis-instance-tester
 git pull --ff-only
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+```
+
+如果更新内容包含 `requirements.txt` 变更，再执行：
+
+```bash
+python3 -m pip install -r requirements.txt
 ```
 
 `git pull --ff-only` 会在服务器源码存在未提交修改时停止，避免覆盖现场文件。因此建议通过
-命令行动态覆盖测试参数，不直接编辑仓库内文件。正式回归测试可切换到已发布的固定 tag，
-避免测试期间 `main` 分支变化：
-
-```bash
-git fetch --tags
-git switch --detach v1.0.0
-```
+命令行动态覆盖测试参数，不直接编辑仓库内文件。
 
 ## 命令速查
 
-进入项目并激活环境：
+进入项目：
 
 ```bash
-cd /opt/redis-instance-tester && source .venv/bin/activate
+cd /opt/redis-instance-tester
 ```
 
 测试有密码的 Redis 主从实例基础功能：
 
 ```bash
-python redis_instance_test.py --host 10.0.0.17 --port 6379 --profile smoke --architecture master-slave
+python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --profile smoke --architecture master-slave
 ```
 
 测试 Redis 4.x 主从实例完整功能，预期 1 个副本：
 
 ```bash
-python redis_instance_test.py --host 10.0.0.17 --port 6379 --profile standard --architecture master-slave --set expectations.version_prefix=4. --set expectations.replicas=1
+python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --profile standard --architecture master-slave --set expectations.version_prefix=4. --set expectations.replicas=1
 ```
 
 测试 Redis 主从实例轻量性能：
 
 ```bash
-python redis_instance_test.py --host 10.0.0.17 --port 6379 --profile performance --architecture master-slave --requests 5000 --concurrency 10 --set expectations.version_prefix=4. --set expectations.replicas=1
+python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --profile performance --architecture master-slave --requests 5000 --concurrency 10 --set expectations.version_prefix=4. --set expectations.replicas=1
 ```
 
 测试 Redis Cluster 实例：
 
 ```bash
-python redis_instance_test.py --host 10.0.0.6 --port 6379 --profile cluster --architecture cluster
+python3 redis_instance_test.py --host 10.0.0.6 --port 6379 --profile cluster --architecture cluster
 ```
 
 测试明确配置为免密的 Redis 实例：
 
 ```bash
-python redis_instance_test.py --host 10.0.0.17 --port 6379 --profile smoke --architecture standalone --no-auth
+python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --profile smoke --architecture standalone --no-auth
 ```
 
 测试关闭 Redis `6379` 安全组端口后是否已阻断：
 
 ```bash
-python redis_instance_test.py --suites security_group --expect-blocked 10.0.0.17:6379 --set security_group.attempts=3 --set security_group.probe_timeout_seconds=3
+python3 redis_instance_test.py --suites security_group --expect-blocked 10.0.0.17:6379 --set security_group.attempts=3 --set security_group.probe_timeout_seconds=3
 ```
 
 测试关闭服务器 `22` 后 SSH 已阻断、但 Redis 仍能登录和读写（从另一台观察机执行）：
 
 ```bash
-python redis_instance_test.py --host 10.0.0.17 --port 6379 --suites security_group,network,authentication,ping,string --expect-blocked 10.0.0.9:22 --expect-reachable 10.0.0.17:6379 --set security_group.attempts=3
+python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --suites security_group,network,authentication,ping,string --expect-blocked 10.0.0.9:22 --expect-reachable 10.0.0.17:6379 --set security_group.attempts=3
 ```
 
 有密码的命令会提示 `Redis password:` 并隐藏输入；`--no-auth` 只用于明确配置为免密的实例。
@@ -255,7 +247,7 @@ Cluster 连接、数据结构、TTL、Lua、原子递增和槽位健康状态
 运行 Cluster 模式：
 
 ```bash
-python redis_instance_test.py \
+python3 redis_instance_test.py \
   --config redis-test.example.json \
   --profile cluster \
   --architecture cluster \
@@ -267,13 +259,13 @@ python redis_instance_test.py \
 查看全部 profile 和 suite：
 
 ```bash
-python redis_instance_test.py --list-suites
+python3 redis_instance_test.py --list-suites
 ```
 
 只执行指定 suite：
 
 ```bash
-python redis_instance_test.py \
+python3 redis_instance_test.py \
   --config redis-test.example.json \
   --suites network,authentication,ping,string,ttl,replication
 ```
@@ -331,7 +323,7 @@ python redis_instance_test.py \
 也可以不改 JSON，直接在测试服务器上动态执行。关闭 Redis 端口后，只检查它是否被阻断：
 
 ```bash
-python redis_instance_test.py \
+python3 redis_instance_test.py \
   --suites security_group \
   --expect-blocked 10.0.0.17:6379 \
   --set security_group.attempts=3 \
@@ -344,7 +336,7 @@ python redis_instance_test.py \
 ```bash
 read -rsp "Redis password: " REDIS_PASSWORD && echo
 export REDIS_PASSWORD
-python redis_instance_test.py \
+python3 redis_instance_test.py \
   --host 10.0.0.17 \
   --port 6379 \
   --suites security_group,network,authentication,ping,string \
@@ -398,7 +390,7 @@ namespace 会在连接 Redis 前被拒绝，不会带着不确定配置开始测
 ```bash
 read -rsp "Redis password: " REDIS_PASSWORD && echo
 export REDIS_PASSWORD
-python redis_instance_test.py \
+python3 redis_instance_test.py \
   --host 10.0.0.17 \
   --port 6379 \
   --profile standard \
@@ -489,7 +481,7 @@ TLS 实例可在配置中启用证书校验：
 read -rsp "Redis password: " REDIS_PASSWORD
 echo
 export REDIS_PASSWORD
-python redis_instance_test.py --config redis-test.example.json
+python3 redis_instance_test.py --config redis-test.example.json
 unset REDIS_PASSWORD
 ```
 
@@ -586,9 +578,9 @@ def test_bitmap(self) -> str:
 修改脚本后运行离线单元测试：
 
 ```bash
-python -m pip install -r requirements-dev.txt
-python -m unittest discover -s tests -v
-python -O -m unittest discover -s tests -v
+python3 -m pip install -r requirements-dev.txt
+python3 -m unittest discover -s tests -v
+python3 -O -m unittest discover -s tests -v
 ```
 
 离线测试使用模拟 Redis，不会访问或修改真实云实例。
@@ -601,7 +593,7 @@ export REDIS_INTEGRATION_HOST=10.0.0.17
 export REDIS_INTEGRATION_PORT=6379
 export REDIS_INTEGRATION_ARCHITECTURE=master-slave
 export REDIS_INTEGRATION_PASSWORD='从安全输入或密钥系统获得'
-python -m unittest tests.test_integration -v
+python3 -m unittest tests.test_integration -v
 unset REDIS_INTEGRATION_PASSWORD
 ```
 
