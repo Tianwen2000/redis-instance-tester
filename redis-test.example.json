@@ -4,8 +4,22 @@
     "port": 6379,
     "db": 0,
     "ssl": false,
+    "ssl_cert_reqs": "required",
+    "ssl_ca_certs": null,
+    "ssl_certfile": null,
+    "ssl_keyfile": null,
+    "ssl_check_hostname": true,
+    "client_name": "redis-instance-tester",
     "socket_connect_timeout": 5.0,
-    "socket_timeout": 5.0
+    "socket_timeout": 5.0,
+    "retry_attempts": 3,
+    "retry_backoff_seconds": 0.25
+  },
+  "security_group": {
+    "probe_timeout_seconds": 2.0,
+    "attempts": 2,
+    "interval_seconds": 0.25,
+    "checks": []
   },
   "authentication": {
     "mode": "prompt",
@@ -29,13 +43,25 @@
   },
   "atomicity": {
     "requests": 1000,
-    "concurrency": 10
+    "concurrency": 10,
+    "max_duration_seconds": 120
   },
   "performance": {
     "requests": 5000,
     "concurrency": 10,
     "value_size": 128,
-    "keyspace": 500
+    "keyspace": 500,
+    "max_duration_seconds": 300,
+    "min_throughput": null,
+    "max_p95_ms": null,
+    "max_p99_ms": null
+  },
+  "health": {
+    "max_memory_ratio": 0.9,
+    "min_fragmentation_ratio": 0.8,
+    "max_fragmentation_ratio": 2.0,
+    "max_blocked_clients": 0,
+    "warn_on_historical_rejections": false
   },
   "report": {
     "directory": "reports"

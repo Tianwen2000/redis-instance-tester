@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 reports/
+.env
+*.key
+redis-test.local.json
