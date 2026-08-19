@@ -1,6 +1,6 @@
 {
   "connection": {
-    "host": "10.0.0.17",
+    "host": "10.0.1.12",
     "port": 6379,
     "db": 0,
     "ssl": false,
@@ -36,7 +36,7 @@
   },
   "expectations": {
     "architecture": "master-slave",
-    "version_prefix": "4.",
+    "version_prefix": "5.",
     "replicas": 1,
     "max_replica_lag_seconds": 2,
     "require_engine_persistence": false

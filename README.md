@@ -2,13 +2,15 @@
 
 这是一个面向云 Redis 实例的可配置 Python 测试工具。它通过 `redis-py` 执行常规数据面测试，并提供安全组 TCP 黑盒验证，支持命令行覆盖、JSON 配置、测试套件组合、JSON 报告和自动清理。
 
+> 注意：下面示例中的路径、命令参数、Redis 实例名、VPC 地址、子网地址及端口等，均需根据你的实际环境替换。
+
 当前示例配置对应：
 
 ```text
 实例：按量计费实例
 实例 ID：crs-8hz033uk
-地址：10.0.0.17:6379
-架构：Redis 4.x master-slave
+地址：10.0.1.12:6379
+架构：Redis 5.2.x master-slave
 副本：1
 ```
 
@@ -108,12 +110,9 @@ dnf install -y git python3 python3-pip
 Python 2.7；较旧发行版如果软件源无法提供 Python 3.8+，应升级系统或使用经过维护的
 Python 软件源。
 
-系统 Python、Git 和项目依赖只需在服务器首次部署时安装。本项目在专用测试服务器上直接
-使用系统 `python3`，不创建 Python 虚拟环境：
-
-```bash
-python3 -m pip install -r requirements.txt
-```
+系统 Python 和 Git 只需在服务器首次部署时安装。本项目在专用测试服务器上直接使用系统
+`python3`，不创建 Python 虚拟环境。项目依赖必须在 `git clone` 并进入仓库目录后安装，
+不要在没有项目目录时执行 `-r requirements.txt`。
 
 以后执行 `git pull` 更新项目时，不需要重新安装系统 Python；只有 `requirements.txt`
 发生变化时才需要重新执行依赖安装命令。
@@ -131,9 +130,48 @@ git clone --depth 1 \
   https://github.com/Tianwen2000/redis-instance-tester.git
 cd redis-instance-tester
 
-python3 -m pip install -r requirements.txt
+python3 -m pip install --user \
+  --index-url https://pypi.org/simple \
+  -r requirements.txt
 python3 redis_instance_test.py --list-suites
 ```
+
+部分云服务器会把 pip 默认配置为内部镜像。如果上面的命令提示
+`No matching distribution found for redis`，说明当前镜像没有该包，可以改用国内镜像：
+
+```bash
+python3 -m pip install --user \
+  --index-url https://mirrors.aliyun.com/pypi/simple/ \
+  -r requirements.txt
+```
+
+安装完成后验证 `redis-py`：
+
+```bash
+python3 -c "import redis; print(redis.__version__)"
+```
+
+如果系统 pip 报 `externally-managed-environment`，且该服务器确实按约定直接使用系统
+Python，可在确认服务器为专用测试机后追加 `--break-system-packages`：
+
+```bash
+python3 -m pip install --user --break-system-packages \
+  --index-url https://pypi.org/simple \
+  -r requirements.txt
+```
+
+如果服务器完全不能访问公网 PyPI，可在其他联网机器、且位于项目目录时下载 wheel，上传
+`wheels/` 到服务器项目目录后执行：
+
+```bash
+python3 -m pip download --only-binary=:all: \
+  -r requirements.txt -d wheels
+python3 -m pip install --user --no-index \
+  --find-links ./wheels -r requirements.txt
+```
+
+以后执行 `git pull` 更新项目时，不需要重新安装系统 Python；只有 `requirements.txt`
+发生变化时才需要重新执行上述依赖安装命令。
 
 后续更新不需要重新上传目录：
 
@@ -145,7 +183,9 @@ git pull --ff-only
 如果更新内容包含 `requirements.txt` 变更，再执行：
 
 ```bash
-python3 -m pip install -r requirements.txt
+python3 -m pip install --user \
+  --index-url https://pypi.org/simple \
+  -r requirements.txt
 ```
 
 `git pull --ff-only` 会在服务器源码存在未提交修改时停止，避免覆盖现场文件。因此建议通过
@@ -153,55 +193,50 @@ python3 -m pip install -r requirements.txt
 
 ## 命令速查
 
-进入项目：
+进入项目后，最常用的全量功能测试命令如下：
 
 ```bash
-cd /opt/redis-instance-tester
+cd /opt/redis-instance-tester && python3 redis_instance_test.py --host 10.0.1.12 --port 6379 --profile standard --architecture master-slave --set expectations.version_prefix=5. --set expectations.replicas=1
 ```
 
-测试有密码的 Redis 主从实例基础功能：
+清理项目生成的报告和 Python 缓存（不会删除源码、配置或 Redis 数据）：
 
 ```bash
-python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --profile smoke --architecture master-slave
+cd /opt/redis-instance-tester && mkdir -p reports && find reports -maxdepth 1 -type f -name '*.json' -delete && find . -type d -name '__pycache__' -prune -exec rm -rf {} + && find . -type f -name '*.pyc' -delete
 ```
 
-测试 Redis 4.x 主从实例完整功能，预期 1 个副本：
+参数说明：
 
-```bash
-python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --profile standard --architecture master-slave --set expectations.version_prefix=4. --set expectations.replicas=1
+- `--host`、`--port`：替换为 Redis 实例地址和端口。
+- `--profile standard`：全量功能测试；快速检查改为 `smoke`，性能测试改为 `performance`。
+- `--architecture master-slave`：主从标准架构。Cluster/集群架构要把这两个参数改为
+  `--profile cluster --architecture cluster`，并删除 `--set expectations.replicas=1`；单机只需
+  改为 `--architecture standalone`，同样删除副本参数。
+- `--set expectations.version_prefix=5.`：要求版本以 `5.` 开头；不校验版本可设为 `null`。
+- `--set expectations.replicas=1`：主从实际至少要有 1 个在线副本，命令中的副本数不能超过实际副本数；实际 1 个写 2 会 `FAIL`。
+- 密码实例：保留命令不变，运行时输入 `Redis password:`；自动化时加
+  `--password-env REDIS_PASSWORD`。免密实例才加 `--no-auth`。
+- `--report reports/xxx.json`：可选，指定报告文件路径。
+
+主命令没有用到的常用参数，只需按需追加：
+
+```text
+--username USER                  Redis 6+ ACL 用户名
+--password-env REDIS_PASSWORD    从环境变量读取密码
+--no-auth                        明确按免密实例测试
+--suites network,ping,string      只执行指定 suite，覆盖 profile
+--cleanup on-success             清理策略：always/on-success/never
+--requests 5000 --concurrency 10 performance 请求数和并发数
+--namespace zhuque:redis-test     自定义测试 Key 前缀
+--report reports/result.json      指定 JSON 报告路径
+--config redis-test.example.json   从 JSON 配置文件读取默认值
+--set section.option=value         临时覆盖配置，可重复使用
+--expect-reachable HOST:PORT       安全组检查该端点应可达
+--expect-blocked HOST:PORT         安全组检查该端点应阻断
 ```
 
-测试 Redis 主从实例轻量性能：
-
-```bash
-python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --profile performance --architecture master-slave --requests 5000 --concurrency 10 --set expectations.version_prefix=4. --set expectations.replicas=1
-```
-
-测试 Redis Cluster 实例：
-
-```bash
-python3 redis_instance_test.py --host 10.0.0.6 --port 6379 --profile cluster --architecture cluster
-```
-
-测试明确配置为免密的 Redis 实例：
-
-```bash
-python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --profile smoke --architecture standalone --no-auth
-```
-
-测试关闭 Redis `6379` 安全组端口后是否已阻断：
-
-```bash
-python3 redis_instance_test.py --suites security_group --expect-blocked 10.0.0.17:6379 --set security_group.attempts=3 --set security_group.probe_timeout_seconds=3
-```
-
-测试关闭服务器 `22` 后 SSH 已阻断、但 Redis 仍能登录和读写（从另一台观察机执行）：
-
-```bash
-python3 redis_instance_test.py --host 10.0.0.17 --port 6379 --suites security_group,network,authentication,ping,string --expect-blocked 10.0.0.9:22 --expect-reachable 10.0.0.17:6379 --set security_group.attempts=3
-```
-
-有密码的命令会提示 `Redis password:` 并隐藏输入；`--no-auth` 只用于明确配置为免密的实例。
+`standard` 是受控的全量功能回归，不包含长时间压力或容量测试；需要性能指标时将
+`--profile standard` 改为 `--profile performance`，并按需增加 `--requests`、`--concurrency`。
 
 ## 测试模式
 
@@ -244,15 +279,10 @@ standard + Python 客户端轻量 SET/GET 性能测试
 Cluster 连接、数据结构、TTL、Lua、原子递增和槽位健康状态
 ```
 
-运行 Cluster 模式：
-
-```bash
-python3 redis_instance_test.py \
-  --config redis-test.example.json \
-  --profile cluster \
-  --architecture cluster \
-  --host 10.0.0.6
-```
+Cluster 不需要另写一套命令：直接使用上面的全量测试命令，把
+`--profile standard --architecture master-slave` 替换为
+`--profile cluster --architecture cluster`，并删除副本参数。Cluster 要求 `connection.db=0`，
+`expectations.replicas` 只适用于主从复制检查。
 
 ## 动态选择用例
 
@@ -267,6 +297,7 @@ python3 redis_instance_test.py --list-suites
 ```bash
 python3 redis_instance_test.py \
   --config redis-test.example.json \
+  --no-auth \
   --suites network,authentication,ping,string,ttl,replication
 ```
 
@@ -302,13 +333,13 @@ python3 redis_instance_test.py \
     "checks": [
       {
         "name": "redis-port-open",
-        "host": "10.0.0.17",
+        "host": "10.0.1.12",
         "port": 6379,
         "expected": "reachable"
       },
       {
         "name": "ssh-port-blocked",
-        "host": "10.0.0.9",
+        "host": "10.0.1.12",
         "port": 22,
         "expected": "blocked"
       }
@@ -324,26 +355,24 @@ python3 redis_instance_test.py \
 
 ```bash
 python3 redis_instance_test.py \
+  --no-auth \
   --suites security_group \
-  --expect-blocked 10.0.0.17:6379 \
+  --expect-blocked 10.0.1.12:6379 \
   --set security_group.attempts=3 \
   --set security_group.probe_timeout_seconds=3 \
   --report reports/redis-port-blocked.json
 ```
 
-恢复 Redis 端口后，验证端口、认证和基础读写全部恢复：
+恢复 Redis 端口后，验证免密实例的端口和基础读写全部恢复：
 
 ```bash
-read -rsp "Redis password: " REDIS_PASSWORD && echo
-export REDIS_PASSWORD
 python3 redis_instance_test.py \
-  --host 10.0.0.17 \
+  --host 10.0.1.12 \
   --port 6379 \
+  --no-auth \
   --suites security_group,network,authentication,ping,string \
-  --expect-reachable 10.0.0.17:6379 \
-  --password-env REDIS_PASSWORD \
+  --expect-reachable 10.0.1.12:6379 \
   --report reports/redis-port-restored.json
-unset REDIS_PASSWORD
 ```
 
 关闭测试服务器的 `22` 端口时，应得到两项独立结论：从另一台观察机新建到测试服务器
@@ -363,52 +392,20 @@ unset REDIS_PASSWORD
 配置文件只接受程序声明的 section 和 option。未知字段、错误类型以及不安全的
 namespace 会在连接 Redis 前被拒绝，不会带着不确定配置开始测试。
 
-常用动态参数：
-
-```text
---host                 Redis 地址
---port                 Redis 端口
---profile              smoke/standard/performance/cluster
---suites               逗号分隔的 suite 名称
---architecture         standalone/master-slave/cluster
---username             Redis 6+ ACL 用户名
---password-env         密码环境变量名称
---no-auth              明确按免密实例测试
---cleanup              always/on-success/never
---requests             performance 请求数
---concurrency          performance 并发数
---namespace            测试 Key 前缀
---report               指定 JSON 报告路径
---set                  覆盖任意已声明配置，可重复使用
---expect-reachable     声明预期可达的 HOST:PORT，可重复使用
---expect-blocked       声明预期阻断的 HOST:PORT，可重复使用
-```
-
 `--set` 使用 `section.option=value`。数字、`true`、`false`、`null`、数组和对象按 JSON
-类型解析，其他内容按字符串处理。示例：
-
-```bash
-read -rsp "Redis password: " REDIS_PASSWORD && echo
-export REDIS_PASSWORD
-python3 redis_instance_test.py \
-  --host 10.0.0.17 \
-  --port 6379 \
-  --profile standard \
-  --architecture master-slave \
-  --password-env REDIS_PASSWORD \
-  --set expectations.version_prefix=4. \
-  --set expectations.replicas=1 \
-  --set expectations.max_replica_lag_seconds=3 \
-  --set atomicity.requests=2000 \
-  --set atomicity.concurrency=20 \
-  --set health.max_memory_ratio=0.85 \
-  --report reports/standard-dynamic.json
-unset REDIS_PASSWORD
-```
+类型解析，其他内容按字符串处理。需要临时修改阈值、请求数或报告路径时，直接把对应的
+`--set`、`--report` 参数追加到“命令速查”中的主命令即可。
 
 数组或对象应使用单引号保护，例如
 `--set 'execution.suites=["network","ping","string"]'`。未知配置项和错误类型仍会在连接前被拒绝。
 Redis 密码不能通过 `--set` 设置，也不应出现在命令行历史中。
+
+关键参数按以下规则判定：主从标准架构实际至少要有 1 个在线副本，命令中的
+`expectations.replicas` 不能超过实际副本数（实际 1、配置 2 会 FAIL；实际 2、配置 1 会 PASS）；
+`version_prefix` 是版本前缀；`max_replica_lag_seconds` 是最大允许延迟；
+`min_throughput` 是最低吞吐量，`max_p95_ms`/`max_p99_ms` 是最大延迟；`requests` 是总请求数，
+`concurrency` 是并发数；安全组 `attempts` 是探测重试次数，不是端口数量。健康阈值超出时默认
+产生 WARN，不直接判定 FAIL。
 
 为避免错误参数对测试机或 Redis 实例造成过大压力，程序执行以下硬限制：
 
@@ -475,17 +472,14 @@ TLS 实例可在配置中启用证书校验：
 }
 ```
 
-在终端安全输入：
+README 中的专项测试命令按免密实例编写，使用配置文件时同样追加 `--no-auth`：
 
 ```bash
-read -rsp "Redis password: " REDIS_PASSWORD
-echo
-export REDIS_PASSWORD
-python3 redis_instance_test.py --config redis-test.example.json
-unset REDIS_PASSWORD
+python3 redis_instance_test.py --config redis-test.example.json --no-auth
 ```
 
-不要把真实密码写进 JSON、脚本、Git 仓库或命令行参数。
+有密码实例应删除 `--no-auth`，交互运行时由程序隐藏输入密码；自动化环境使用上面的
+`REDIS_PASSWORD` 环境变量配置。不要把真实密码写进 JSON、脚本、Git 仓库或命令行参数。
 
 ## 清理策略
 
@@ -513,8 +507,8 @@ Redis 客户端连接池会在清理完成后显式关闭。
 控制台结果示例：
 
 ```text
-[PASS] network          1.20 ms  TCP reachable at 10.0.0.17:6379
-[FAIL] authentication   0.83 ms  Unauthenticated PING succeeded while authentication is required
+[PASS] network          1.20 ms  TCP reachable at 10.0.1.12:6379
+[SKIP] authentication   0.00 ms  Authentication is not required by configuration
 [PASS] ping             0.55 ms  PONG
 [WARN] persistence      0.92 ms  aof_enabled=0, save=''; verify platform-level backup policy
 [PASS] cleanup          1.40 ms  deleted=15, remaining=0
@@ -540,6 +534,8 @@ SKIP    当前架构或配置不适用
 130  用户通过 Ctrl+C 中断测试
 143  进程收到 SIGTERM 后终止
 ```
+
+
 
 ## 新增用例
 
@@ -578,7 +574,9 @@ def test_bitmap(self) -> str:
 修改脚本后运行离线单元测试：
 
 ```bash
-python3 -m pip install -r requirements-dev.txt
+python3 -m pip install --user \
+  --index-url https://pypi.org/simple \
+  -r requirements-dev.txt
 python3 -m unittest discover -s tests -v
 python3 -O -m unittest discover -s tests -v
 ```
@@ -589,15 +587,15 @@ python3 -O -m unittest discover -s tests -v
 `tests/test_integration.py` 默认跳过。设置目标环境变量后可以执行真实数据面集成测试：
 
 ```bash
-export REDIS_INTEGRATION_HOST=10.0.0.17
+export REDIS_INTEGRATION_HOST=10.0.1.12
 export REDIS_INTEGRATION_PORT=6379
 export REDIS_INTEGRATION_ARCHITECTURE=master-slave
-export REDIS_INTEGRATION_PASSWORD='从安全输入或密钥系统获得'
-python3 -m unittest tests.test_integration -v
 unset REDIS_INTEGRATION_PASSWORD
+python3 -m unittest tests.test_integration -v
 ```
 
 可选变量包括 `REDIS_INTEGRATION_USERNAME`、`REDIS_INTEGRATION_SSL`、
 `REDIS_INTEGRATION_SSL_CA_CERTS`、`REDIS_INTEGRATION_VERSION_PREFIX`、
 `REDIS_INTEGRATION_REPLICAS` 和 `REDIS_INTEGRATION_PERFORMANCE`。真实集成测试同样使用唯一
-Key 前缀并在 `tearDown` 中清理。
+Key 前缀并在 `tearDown` 中清理。免密实例不要设置 `REDIS_INTEGRATION_PASSWORD`；有密码
+实例再通过安全方式设置该变量。
