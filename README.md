@@ -209,6 +209,7 @@ cd /opt/redis-instance-tester && mkdir -p reports && find reports -maxdepth 1 -t
 
 - `--host`、`--port`：替换为 Redis 实例地址和端口。
 - `--profile standard`：全量功能测试；快速检查改为 `smoke`，性能测试改为 `performance`。
+- `standard` 只覆盖 Redis 数据面功能，不自动执行安全组端口测试；安全组请按下面的专项流程单独执行。
 - `--architecture master-slave`：主从标准架构。Cluster/集群架构要把这两个参数改为
   `--profile cluster --architecture cluster`，并删除 `--set expectations.replicas=1`；单机只需
   改为 `--architecture standalone`，同样删除副本参数。
@@ -216,6 +217,8 @@ cd /opt/redis-instance-tester && mkdir -p reports && find reports -maxdepth 1 -t
 - `--set expectations.replicas=1`：主从实际至少要有 1 个在线副本，命令中的副本数不能超过实际副本数；实际 1 个写 2 会 `FAIL`。
 - 密码实例：保留命令不变，运行时输入 `Redis password:`；自动化时加
   `--password-env REDIS_PASSWORD`。免密实例才加 `--no-auth`。
+- 上面这条主命令默认按“可能需要认证”的实例运行；README 后面的安全组专项命令已经按免密
+  实例写好 `--no-auth`。
 - `--report reports/xxx.json`：可选，指定报告文件路径。
 
 主命令没有用到的常用参数，只需按需追加：
@@ -318,43 +321,58 @@ python3 redis_instance_test.py \
 
 ## 安全组生效验证
 
-`security_group` suite 从脚本所在机器发起 TCP 连接，检查配置的端点是否符合
-`reachable`（应可达）或 `blocked`（应阻断）预期。它不修改云平台安全组，也不能仅凭
-一次 TCP 失败区分安全组、网络 ACL、路由和服务未监听；安全组变更和回滚仍应在云平台侧完成。
+`security_group` suite 只发起 TCP 连接，不登录 Redis，也不修改云平台安全组。你需要先在
+云服务控制台关闭或恢复规则，再从观察机运行命令验证结果。
 
-配置形式：
+只执行 `security_group` 时不会产生 Redis 测试 Key，也不会执行认证、PING 或读写操作；报告中
+出现 `cleanup: No authenticated Redis commands were executed` 属于正常结果。
 
-```json
-{
-  "security_group": {
-    "probe_timeout_seconds": 2,
-    "attempts": 3,
-    "interval_seconds": 0.25,
-    "checks": [
-      {
-        "name": "redis-port-open",
-        "host": "10.0.1.12",
-        "port": 6379,
-        "expected": "reachable"
-      },
-      {
-        "name": "ssh-port-blocked",
-        "host": "10.0.1.12",
-        "port": 22,
-        "expected": "blocked"
-      }
-    ]
-  },
-  "execution": {
-    "suites": ["security_group"]
-  }
-}
+先区分两个角色：
+
+- **观察机**：运行 `python3 redis_instance_test.py` 的服务器，例如 `VM-1-13-ubuntu`。
+- **目标端点**：被探测的 `HOST:PORT`。Redis 端点是 `10.0.1.12:6379`；Linux 服务器
+  的 SSH 端点通常是 `<linux-server-ip>:22`。
+
+命令中的 `--host`、`--port` 是默认目标地址，`--expect-blocked` 或 `--expect-reachable`
+是本次安全组检查的实际目标。安全组专项命令也建议始终写出 `--host` 和 `--port`，避免报告
+显示默认的 `127.0.0.1:6379`。`--no-auth` 对只执行 `security_group` 没有实际作用，但示例
+统一保留，表示按免密环境执行。
+
+记住这两个测试流程：
+
+```text
+测试 Redis：控制台关闭 6379 -> 观察机执行 blocked 命令 -> 恢复 6379 -> 执行 restored 命令
+测试 SSH：  控制台关闭 Linux 服务器 22 -> 外部观察机执行 blocked 命令 -> 恢复 22 -> 执行 restored 命令
 ```
 
-也可以不改 JSON，直接在测试服务器上动态执行。关闭 Redis 端口后，只检查它是否被阻断：
+截图中使用的 `10.0.1.12:6379` 命令属于第一种流程，不能用来判断 SSH `22` 是否关闭。
+
+### 场景一：关闭和恢复 Redis 6379
+
+以下命令都在观察机上执行，控制台操作的是 Redis 实例的 TCP `6379` 入方向规则。
+
+1. 关闭规则前，先确认端口可达：
 
 ```bash
 python3 redis_instance_test.py \
+  --host 10.0.1.12 \
+  --port 6379 \
+  --no-auth \
+  --suites security_group \
+  --expect-reachable 10.0.1.12:6379 \
+  --set security_group.attempts=3 \
+  --set security_group.probe_timeout_seconds=3 \
+  --report reports/redis-port-before.json
+```
+
+2. 在云控制台关闭允许观察机访问 Redis 的 TCP `6379` 规则，等待规则生效。
+
+3. 回到观察机，检查端口是否被阻断：
+
+```bash
+python3 redis_instance_test.py \
+  --host 10.0.1.12 \
+  --port 6379 \
   --no-auth \
   --suites security_group \
   --expect-blocked 10.0.1.12:6379 \
@@ -363,7 +381,12 @@ python3 redis_instance_test.py \
   --report reports/redis-port-blocked.json
 ```
 
-恢复 Redis 端口后，验证免密实例的端口和基础读写全部恢复：
+预期是 `expected=blocked observed=blocked` 和 `[PASS] security_group`。如果是
+`expected=blocked observed=reachable`，说明从这台观察机访问时端口仍然放行，安全组测试不通过。
+
+4. 在云控制台恢复 TCP `6379` 规则，等待规则生效。
+
+5. 在同一台观察机验证端口和 Redis 基础读写：
 
 ```bash
 python3 redis_instance_test.py \
@@ -375,13 +398,89 @@ python3 redis_instance_test.py \
   --report reports/redis-port-restored.json
 ```
 
-关闭测试服务器的 `22` 端口时，应得到两项独立结论：从另一台观察机新建到测试服务器
-`22` 的连接失败；测试服务器到 Redis `6379` 的连接和 Redis 读写仍成功。不要在测试服务器
-本机探测自己的入方向 `22` 规则，这不能代表外部流量。已有 SSH 会话也可能因连接跟踪继续存活，
-因此不能作为“22 仍开放”的依据。
+预期为安全组、网络、PING 和 String 测试通过；`authentication` 在免密模式下显示 `SKIP`。
 
-执行关闭 `22` 的测试前，必须准备云控制台/VNC/堡垒机等独立管理通道和自动回滚规则，
-避免把唯一管理入口永久关闭。
+`--set security_group.attempts=3` 表示连接失败时最多探测 3 次。连接第一次成功时会显示
+`attempts=1`，这是正常的，不表示参数没有生效。
+
+### 场景二：关闭和恢复 Linux 服务器 SSH 22
+
+这个场景测试的是 Linux 服务器的入方向 TCP `22`，不是 Redis 的 `10.0.1.12:6379`。
+如果 `10.0.1.12` 是托管 Redis 地址，不能把它的 `22` 当作 SSH 端口测试。
+
+被测试的 Linux 服务器必须使用另一台观察机发起新连接。不要在被测试服务器本机探测自己的
+入方向 `22`，也不要把已有 SSH 会话当作端口仍开放的依据。
+
+关闭规则前，在外部观察机确认 `22` 可达：
+
+```bash
+python3 redis_instance_test.py \
+  --host <linux-server-ip> \
+  --port 22 \
+  --no-auth \
+  --suites security_group \
+  --expect-reachable <linux-server-ip>:22 \
+  --report reports/ssh-port-before.json
+```
+
+然后在云控制台关闭该 Linux 服务器的 TCP `22` 入方向规则，再从外部观察机执行：
+
+```bash
+python3 redis_instance_test.py \
+  --host <linux-server-ip> \
+  --port 22 \
+  --no-auth \
+  --suites security_group \
+  --expect-blocked <linux-server-ip>:22 \
+  --report reports/ssh-port-blocked.json
+```
+
+恢复 TCP `22` 规则后，再从外部观察机执行：
+
+```bash
+python3 redis_instance_test.py \
+  --host <linux-server-ip> \
+  --port 22 \
+  --no-auth \
+  --suites security_group \
+  --expect-reachable <linux-server-ip>:22 \
+  --report reports/ssh-port-restored.json
+```
+
+关闭 `22` 前必须准备云控制台、VNC 或堡垒机等备用管理通道和自动回滚方案，避免关闭唯一
+登录入口。安全组测试只能说明 TCP 当前可达或阻断，不能仅凭一次 TCP 失败区分安全组、网络
+ACL、路由、防火墙或服务未监听；规则变更和原因定位仍需结合云平台配置及服务器状态。
+
+如果要测试的是当前观察机自己的 `22` 端口，当前观察机不能同时作为观察机，必须再准备第三台
+机器从外部发起新连接。关闭 `22` 后，仍可从独立机器测试 Redis `6379` 是否可达；这与 SSH
+端口测试是两个独立结论。
+
+配置形式（仅示例 Redis `6379`，SSH `22` 请按上面的独立场景执行）：
+
+```json
+{
+  "security_group": {
+    "probe_timeout_seconds": 2,
+    "attempts": 3,
+    "interval_seconds": 0.25,
+    "checks": [
+      {
+        "name": "redis-port",
+        "host": "10.0.1.12",
+        "port": 6379,
+        "expected": "reachable"
+      }
+    ]
+  },
+  "execution": {
+    "suites": ["security_group"]
+  }
+}
+```
+
+JSON 中 `expected` 表示当前这次运行的预期状态：关闭规则前或恢复后写 `reachable`，关闭规则
+后改为 `blocked`。不想编辑 JSON 时，直接使用上面的 `--expect-reachable` 或 `--expect-blocked`
+命令行参数即可。
 
 ## 配置覆盖顺序
 
