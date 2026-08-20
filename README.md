@@ -337,7 +337,7 @@ python3 redis_instance_test.py \
 
 - **观察机**：运行 `python3 redis_instance_test.py` 的服务器，例如 `VM-1-13-ubuntu`。
 - **目标端点**：被探测的 `HOST:PORT`。Redis 端点是 `10.0.1.12:6379`；Linux 服务器
-  的 SSH 端点示例是 `87.76.176.5:22`，需替换为目标机实际 IP，命令中不要输入尖括号。
+  的 SSH 端点示例是目标 Debian 的 `10.0.0.10:22`，需替换为目标机实际 IP，命令中不要输入尖括号。
 
 命令中的 `--host`、`--port` 是默认目标地址，`--expect-blocked` 或 `--expect-reachable`
 是本次安全组检查的实际目标。安全组专项命令也建议始终写出 `--host` 和 `--port`，避免报告
@@ -348,7 +348,7 @@ python3 redis_instance_test.py \
 
 ```text
 测试 Redis：控制台关闭 6379 -> 观察机执行 blocked 命令 -> 恢复 6379 -> 执行 restored 命令
-测试 SSH：  控制台关闭 Linux 服务器 22 -> 外部观察机执行 blocked 命令 -> 恢复 22 -> 执行 restored 命令
+测试 SSH：  控制台关闭目标 Linux 服务器 22 -> 另一台观察机执行 blocked 命令 -> 恢复 22 -> 执行 restored 命令
 ```
 
 截图中使用的 `10.0.1.12:6379` 命令属于第一种流程，不能用来判断 SSH `22` 是否关闭。
@@ -421,9 +421,13 @@ python3 redis_instance_test.py \
 
 ```text
 云控制台                  修改和恢复目标机 A 的安全组
-观察机 B                  运行 redis_instance_test.py，整个过程保持可操作
-目标机 A（87.76.176.5）   被测试的 Linux 服务器，临时关闭其 TCP 22
+观察机 B（Ubuntu，10.0.1.13）  运行 redis_instance_test.py，整个过程保持可操作
+目标机 A（Debian，10.0.0.10）   被测试的 Linux 服务器，临时拒绝来自观察机 B 的 TCP 22
 ```
+
+下面命令按当前环境示例：观察机 B 是 `VM-1-13-ubuntu`（`10.0.1.13`），目标机 A 是
+`VM-0-10-debian`（`10.0.0.10`）。如果你的实例地址不同，只替换目标机内网 IP 和观察机实际
+源 IP；不要把观察机自己的地址写成 `--host`。
 
 两台机器不要求使用两个安全组，一个安全组也可以完成测试。关键是目标机 A 的入站规则要按
 观察机 B 的实际源 IP 精确匹配，并且目标机没有其他规则或关联安全组继续放行 `22`。目标机
@@ -459,7 +463,7 @@ python3 redis_instance_test.py \
 开始前必须满足以下条件：
 
 - `redis-instance-tester` 部署在观察机 B，不是目标机 A。
-- 观察机 B 的公网 IP 和目标机 A 的 `87.76.176.5` 不相同。
+- 观察机 B 和目标机 A 必须是两台不同的服务器，且目标机 A 的公网 IP 不应作为观察机自测地址。
 - 云控制台已经登录，并准备好 VNC、串口控制台、WebShell 或堡垒机等独立恢复通道。
 - 已记录目标机 A 原有的 TCP `22` 允许规则，测试完成后能够原样恢复。
 - 已确认目标机 A 的所有关联安全组中没有覆盖本次拒绝规则的全放行规则；如平台存在同安全组
@@ -472,23 +476,23 @@ python3 redis_instance_test.py \
 curl -4s https://api.ipify.org && echo
 ```
 
-如果输出也是 `87.76.176.5`，说明当前机器就是目标机 A，不能在这里继续测试它自己的 `22`。
+如果输出的是目标机 A 的公网 IP，说明当前机器可能就是目标机 A，不能在这里继续测试它自己的 `22`。
 如果观察机通过私网访问目标机，再执行下面的命令，以输出中的 `src` 地址作为安全组“来源”；
 不要想当然地把公网 IP 填成来源：
 
 ```bash
-ip route get 87.76.176.5
+ip route get 10.0.0.10
 ```
 
 以下三条测试命令全部在**观察机 B**执行。第一步，在关闭规则前确认目标机 A 的 `22` 可达：
 
 ```bash
 python3 redis_instance_test.py \
-  --host 87.76.176.5 \
+  --host 10.0.0.10 \
   --port 22 \
   --no-auth \
   --suites security_group \
-  --expect-reachable 87.76.176.5:22 \
+  --expect-reachable 10.0.0.10:22 \
   --report reports/ssh-port-before.json
 ```
 
@@ -497,11 +501,11 @@ python3 redis_instance_test.py \
 
 ```bash
 python3 redis_instance_test.py \
-  --host 87.76.176.5 \
+  --host 10.0.0.10 \
   --port 22 \
   --no-auth \
   --suites security_group \
-  --expect-blocked 87.76.176.5:22 \
+  --expect-blocked 10.0.0.10:22 \
   --set security_group.attempts=3 \
   --set security_group.probe_timeout_seconds=3 \
   --report reports/ssh-port-blocked.json
@@ -515,11 +519,11 @@ python3 redis_instance_test.py \
 
 ```bash
 python3 redis_instance_test.py \
-  --host 87.76.176.5 \
+  --host 10.0.0.10 \
   --port 22 \
   --no-auth \
   --suites security_group \
-  --expect-reachable 87.76.176.5:22 \
+  --expect-reachable 10.0.0.10:22 \
   --report reports/ssh-port-restored.json
 ```
 
